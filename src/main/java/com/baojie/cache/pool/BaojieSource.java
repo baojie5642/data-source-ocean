@@ -64,7 +64,7 @@ public abstract class BaojieSource<K extends BaojieKey, V extends BaojieValue> i
     }
 
     private final BaojieTPool createPool(String name) {
-        return new BaojieTPool(4, 32, 60, TimeUnit.SECONDS, new SynchronousQueue<>(), BaojieFactory.create(name + "-watch", true));
+        return new BaojieTPool(4, 32, 60, TimeUnit.SECONDS, new SynchronousQueue<>(), BaojieFactory.create(name, true));
     }
 
     private final void startCloser() {
