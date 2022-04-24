@@ -47,7 +47,7 @@ public class TestJDK16 {
             }
         }
 
-        FishSleep.park(6, TimeUnit.SECONDS);
+        FishSleep.park(6, TimeUnit.MINUTES);
         pool.close();
 
     }

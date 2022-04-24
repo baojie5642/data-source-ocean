@@ -1,14 +1,11 @@
 package com.baojie.cache.pool;
 
-import com.baojie.cache.info.SourceDetail;
 import com.baojie.cache.key.BaojieKey;
 import com.baojie.cache.key.DelayKey;
-import com.baojie.cache.key.LocalKey;
 import com.baojie.cache.util.BaojieFactory;
 import com.baojie.cache.util.BaojieTPool;
 import com.baojie.cache.util.FishSleep;
 import com.baojie.cache.value.BaojieValue;
-import com.baojie.cache.value.LocalValue;
 
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -24,7 +21,6 @@ public abstract class BaojieSource<K extends BaojieKey, V extends BaojieValue> i
     // 使用周期的探测
     // 取出 -> 检测 -> 是否再放回队列
     private final DelayQueue<DelayKey<K>> delays = new DelayQueue<>();
-    // 专门负责关闭的队列
 
     private final ThreadLocalRandom random = ThreadLocalRandom.current();
     // 缓存的同步控制主要处理新增缓存与延迟清理的冲突
@@ -33,6 +29,7 @@ public abstract class BaojieSource<K extends BaojieKey, V extends BaojieValue> i
     private final ReentrantReadWriteLock.WriteLock writeLock = mainLock.writeLock();
 
     private final ConcurrentHashMap<K, V> cache;
+    // 专门负责关闭的队列
     private final LinkedBlockingQueue<V> toCloses;
     private final AtomicBoolean stop = new AtomicBoolean(false);
     private final List<Future<?>> wfs = new ArrayList<>(64);
@@ -343,9 +340,6 @@ public abstract class BaojieSource<K extends BaojieKey, V extends BaojieValue> i
 
     public abstract V buildSource(K k);
 
-    @Override
-    public abstract V acquire(SourceDetail detail);
-
     private final boolean stopped() {
         if (stop.get()) {
             return true;
@@ -359,7 +353,7 @@ public abstract class BaojieSource<K extends BaojieKey, V extends BaojieValue> i
         long now = System.currentTimeMillis();
         long temp = now - expire;
         long dura = Math.abs(temp);
-        // 大于或者小于三天都需要关闭
+        // 大于 或者 小于 七天 都需要关闭
         if (dura >= BaojieKey.SEVEN_DAY) {
             return true;
         } else {
@@ -565,24 +559,13 @@ public abstract class BaojieSource<K extends BaojieKey, V extends BaojieValue> i
         public void run() {
             for (; ; ) {
                 if (stopped()) {
-                    closeAllSource();
+                    closeQueue();
                     break;
                 } else {
                     V v = getCloseFromQueue();
                     if (null != v) {
                         v.close();
                     }
-                }
-            }
-        }
-
-        private void closeAllSource() {
-            for (; ; ) {
-                V v = toCloses.poll();
-                if (null != v) {
-                    v.close();
-                } else {
-                    break;
                 }
             }
         }
