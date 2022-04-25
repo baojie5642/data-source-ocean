@@ -29,8 +29,8 @@ public class SourcePool<K extends BaojieKey, V extends BaojieValue> extends Baoj
     @Override
     public final V acquire(SourceDetail detail) {
         // String sid=stampNum.keyNum();
-        String sid = detail.getJdbc();
-        BaojieKey<SourceDetail> key = new LocalKey(sid, detail);
+        String osid = detail.oceanSandID();
+        BaojieKey<SourceDetail> key = new LocalKey(osid, detail);
         return acquire((K) key);
     }
 

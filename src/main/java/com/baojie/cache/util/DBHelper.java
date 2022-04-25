@@ -141,6 +141,8 @@ public class DBHelper {
 
     private final HikariConfig hikariConfig(SourceDetail detail) {
         final HikariConfig config = new HikariConfig();
+        String osid = detail.oceanSandID();
+        config.setPoolName(osid);
         String url = detail.getJdbc();
         config.setJdbcUrl(url);
         String un = detail.getUser();
@@ -155,7 +157,7 @@ public class DBHelper {
         // 池中维护的最小空闲连接数
         config.setMinimumIdle(8);
         // 从数据库链接池获取connection的等待时间
-        config.setConnectionTimeout(120_000L);
+        config.setConnectionTimeout(180_000L);
         // 连接允许在池中闲置的最长时间
         config.setIdleTimeout(300_000L);
         // 池中连接最长生命周期

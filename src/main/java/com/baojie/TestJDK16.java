@@ -21,6 +21,7 @@ public class TestJDK16 {
         Pool<LocalKey, LocalValue> pool = new SourcePool<>(8192, "test-pool");
         DBHelper helper = DBHelper.getInstance();
         final SourceDetail detail = new SourceDetail();
+        detail.setDomain("liuxin176");
         detail.setIp("127.0.0.1");
         detail.setPort("3306");
         detail.setUser("root");
@@ -30,15 +31,22 @@ public class TestJDK16 {
         detail.setJdbc(url);
         detail.setDbName("mysql_for_test");
 
-        for (int i = 0; i < 3; i++) {
+        for (int i = 0; i < 999; i++) {
             LocalValue source = null;
             try {
                 source = pool.acquire(detail);
                 Key key = source.getKey();
                 SourceDetail dt = key.info();
                 DataSource ds = source.getSource();
-                Connection connection = ds.getConnection();
-                connection.close();
+                Connection connection_0 = ds.getConnection();
+                Connection connection_1 = ds.getConnection();
+                Connection connection_2 = ds.getConnection();
+                FishSleep.park(3, TimeUnit.SECONDS);
+                connection_0.close();
+                FishSleep.park(3, TimeUnit.SECONDS);
+                connection_1.close();
+                FishSleep.park(3, TimeUnit.SECONDS);
+                connection_2.close();
                 source.release();
             } finally {
                 if (null != source) {

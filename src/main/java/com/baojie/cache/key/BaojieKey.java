@@ -1,7 +1,6 @@
 package com.baojie.cache.key;
 
 import com.baojie.cache.info.SourceDetail;
-import com.baojie.cache.util.StampNum;
 
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
@@ -43,25 +42,22 @@ public abstract class BaojieKey<T extends SourceDetail> implements Key<T> {
     private volatile TimeUnit unit = TimeUnit.MINUTES;
     // 可以外部调用方法进行设置
     private volatile long appendTime = 3;
+    private volatile long inCachedTime = System.currentTimeMillis();
 
     protected final String key;
     protected final T info;
-    protected final StampNum stamp = StampNum.getInstance();
 
     // 可以增加其他的需要管控的属性进来
     protected BaojieKey(String key, T info) {
         if (null == key) {
             throw new NullPointerException("key not be null");
+        } else if (null == info) {
+            throw new NullPointerException("info not be null");
         } else {
             this.key = key;
             this.info = info;
             baseTimeOut();
         }
-    }
-
-    protected BaojieKey() {
-        this.key = stamp.keyNum();
-        this.info = null;
     }
 
     private final long baseTimeOut() {
@@ -129,6 +125,26 @@ public abstract class BaojieKey<T extends SourceDetail> implements Key<T> {
             }
         } finally {
             read.unlock();
+        }
+    }
+
+    public final long existMillis() {
+        long now = System.currentTimeMillis();
+        long exist = now - inCachedTime;
+        if (exist <= 0) {
+            return 0;
+        } else {
+            return exist;
+        }
+    }
+
+    public final long getInCachedTime() {
+        return inCachedTime;
+    }
+
+    public final void setInCachedTime(long inCachedTime) {
+        if (inCachedTime > this.inCachedTime) {
+            this.inCachedTime = inCachedTime;
         }
     }
 

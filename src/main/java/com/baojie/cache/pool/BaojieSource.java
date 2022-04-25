@@ -1,15 +1,17 @@
 package com.baojie.cache.pool;
 
+import com.baojie.cache.info.SourceDetail;
 import com.baojie.cache.key.BaojieKey;
 import com.baojie.cache.key.DelayKey;
 import com.baojie.cache.util.BaojieFactory;
 import com.baojie.cache.util.BaojieTPool;
 import com.baojie.cache.util.FishSleep;
 import com.baojie.cache.value.BaojieValue;
+import com.zaxxer.hikari.HikariConfigMXBean;
+import com.zaxxer.hikari.HikariDataSource;
+import com.zaxxer.hikari.HikariPoolMXBean;
 
-import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.List;
+import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicStampedReference;
@@ -34,9 +36,11 @@ public abstract class BaojieSource<K extends BaojieKey, V extends BaojieValue> i
     private final AtomicBoolean stop = new AtomicBoolean(false);
     private final List<Future<?>> wfs = new ArrayList<>(64);
     private final List<Future<?>> cfs = new ArrayList<>(64);
+    private final List<Future<?>> mfs = new ArrayList<>(64);
     private final AtomicStampedReference<Integer> size = new AtomicStampedReference<>(0, 0);
     private final BaojieTPool wps;
     private final BaojieTPool cps;
+    private final BaojieTPool mps;
     private final String name;
     private final int contains;
     private volatile int sleep = 180;
@@ -55,8 +59,10 @@ public abstract class BaojieSource<K extends BaojieKey, V extends BaojieValue> i
             this.name = name;
             this.wps = createPool(name + "-watch");
             this.cps = createPool(name + "-close");
+            this.mps = createPool(name + "-monitor");
             startCloser();
             startWatcher();
+            startMonitor();
         }
     }
 
@@ -77,6 +83,14 @@ public abstract class BaojieSource<K extends BaojieKey, V extends BaojieValue> i
             Watcher cleaner = new Watcher();
             Future<?> fu = wps.submit(cleaner);
             wfs.add(fu);
+        }
+    }
+
+    private final void startMonitor() {
+        for (int i = 0; i < 1; i++) {
+            Monitor cleaner = new Monitor();
+            Future<?> fu = mps.submit(cleaner);
+            mfs.add(fu);
         }
     }
 
@@ -162,6 +176,9 @@ public abstract class BaojieSource<K extends BaojieKey, V extends BaojieValue> i
                     decrementSize();
                     // 设置不在缓存标记
                     value.setNotInCache();
+                } else {
+                    // 在 key 中标记缓存放入的时间
+                    key.setInCachedTime(System.currentTimeMillis());
                 }
             } finally {
                 // 无论如何都要 acquire
@@ -291,7 +308,11 @@ public abstract class BaojieSource<K extends BaojieKey, V extends BaojieValue> i
         try {
             stopWatcher();
         } finally {
-            stopCloser();
+            try {
+                stopCloser();
+            } finally {
+                stopMonitor();
+            }
         }
     }
 
@@ -316,6 +337,14 @@ public abstract class BaojieSource<K extends BaojieKey, V extends BaojieValue> i
             cps.cancel(cfs, cps);
         } finally {
             cps.shutdown(cps);
+        }
+    }
+
+    private final void stopMonitor() {
+        try {
+            mps.cancel(mfs, mps);
+        } finally {
+            mps.shutdown(mps);
         }
     }
 
@@ -568,6 +597,83 @@ public abstract class BaojieSource<K extends BaojieKey, V extends BaojieValue> i
                     }
                 }
             }
+        }
+
+    }
+
+    private final class Monitor implements Runnable {
+
+        public Monitor() {
+
+        }
+
+        @Override
+        public void run() {
+            for (; ; ) {
+                if (stopped()) {
+                    break;
+                } else {
+                    try {
+                        Iterator<Map.Entry<K, V>> iterator = entryIterator();
+                        visitEntrys(iterator);
+                    } finally {
+                        FishSleep.park(60, TimeUnit.SECONDS);
+                    }
+                }
+            }
+        }
+
+        private Iterator<Map.Entry<K, V>> entryIterator() {
+            return cache.entrySet().iterator();
+        }
+
+        private void visitEntrys(Iterator<Map.Entry<K, V>> iterator) {
+            while (iterator.hasNext()) {
+                Map.Entry<K, V> entry = iterator.next();
+                lookSource(entry);
+                if (stopped()) {
+                    break;
+                }
+            }
+        }
+
+        private void lookSource(Map.Entry<K, V> entry) {
+            V value = entry.getValue();
+            Object source = value.getSource();
+            if (null != source) {
+                checkSource(entry, source);
+            }
+        }
+
+        private void checkSource(Map.Entry<K, V> entry, Object source) {
+            if (source instanceof HikariDataSource) {
+                HikariDataSource hikari = HikariDataSource.class.cast(source);
+                dealHikariCP(entry, hikari);
+            }
+        }
+
+        private void dealHikariCP(Map.Entry<K, V> entry, HikariDataSource hikari) {
+            K key = entry.getKey();
+            SourceDetail detail = key.info();
+
+            String domain = detail.getDomain();
+            long exist = key.existMillis();
+            long sec = TimeUnit.SECONDS.convert(exist, TimeUnit.MILLISECONDS);
+            long expire = key.getExpire();
+
+            Date now = new Date(expire);
+
+            HikariConfigMXBean configMXBean = hikari.getHikariConfigMXBean();
+            HikariPoolMXBean poolMXBean = hikari.getHikariPoolMXBean();
+
+            String poolName = configMXBean.getPoolName();
+            int total = poolMXBean.getTotalConnections();
+            int active = poolMXBean.getActiveConnections();
+            int idle = poolMXBean.getIdleConnections();
+            int wait = poolMXBean.getThreadsAwaitingConnection();
+
+            System.out.println("domain=" + domain + ", exit=" + sec + ", expire=" + now + ", pool-name=" + poolName + ", total=" + total + ", active=" + active + ", idle=" + idle + ", wait=" + wait);
+
         }
 
     }
