@@ -153,9 +153,9 @@ public class DBHelper {
         config.setDriverClassName(dn);
         // 池中最大连接数,包括闲置和使用中的连接
         // 扩大链接到 128
-        config.setMaximumPoolSize(128);
+        config.setMaximumPoolSize(2);
         // 池中维护的最小空闲连接数
-        config.setMinimumIdle(8);
+        config.setMinimumIdle(1);
         // 从数据库链接池获取connection的等待时间
         config.setConnectionTimeout(180_000L);
         // 连接允许在池中闲置的最长时间

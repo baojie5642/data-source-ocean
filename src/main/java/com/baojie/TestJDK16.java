@@ -18,7 +18,7 @@ public class TestJDK16 {
 
     public static void main(String args[]) throws Throwable {
 
-        Pool<LocalKey, LocalValue> pool = new SourcePool<>(8192, "test-pool");
+        SourcePool<LocalKey, LocalValue> pool = new SourcePool<>(8192, "test-pool");
         DBHelper helper = DBHelper.getInstance();
         final SourceDetail detail = new SourceDetail();
         detail.setDomain("liuxin176");
@@ -31,23 +31,23 @@ public class TestJDK16 {
         detail.setJdbc(url);
         detail.setDbName("mysql_for_test");
 
+        LocalKey test = new LocalKey(detail.oceanSandID(), detail);
         for (int i = 0; i < 999; i++) {
             LocalValue source = null;
             try {
-                source = pool.acquire(detail);
+                source = pool.getCached(test);
+                if (null == source) {
+                    source = pool.acquire(detail);
+                }
                 Key key = source.getKey();
                 SourceDetail dt = key.info();
                 DataSource ds = source.getSource();
                 Connection connection_0 = ds.getConnection();
-                Connection connection_1 = ds.getConnection();
-                Connection connection_2 = ds.getConnection();
-                FishSleep.park(3, TimeUnit.SECONDS);
+
+
                 connection_0.close();
-                FishSleep.park(3, TimeUnit.SECONDS);
-                connection_1.close();
-                FishSleep.park(3, TimeUnit.SECONDS);
-                connection_2.close();
                 source.release();
+                FishSleep.park(12, TimeUnit.SECONDS);
             } finally {
                 if (null != source) {
                     source.release();

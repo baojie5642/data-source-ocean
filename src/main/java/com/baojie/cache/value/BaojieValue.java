@@ -1,5 +1,7 @@
 package com.baojie.cache.value;
 
+import com.baojie.cache.info.DBType;
+import com.baojie.cache.info.SourceDetail;
 import com.baojie.cache.key.BaojieKey;
 
 import javax.sql.DataSource;
@@ -8,8 +10,8 @@ public abstract class BaojieValue<K extends BaojieKey, V extends DataSource> imp
 
     protected final K key;
     protected final V source;
-    // 默认数据源会成功放入缓存
-    protected boolean cached = true;
+    // 默认数据源不会成功放入缓存
+    protected boolean cached = false;
 
     protected BaojieValue(K key, V source) {
         if (null == source || null == key) {
@@ -28,6 +30,18 @@ public abstract class BaojieValue<K extends BaojieKey, V extends DataSource> imp
     @Override
     public K getKey() {
         return key;
+    }
+
+    public final SourceDetail getDetail() {
+        return key.info();
+    }
+
+    public final DBType getDataBaseType() {
+        return getDetail().getType();
+    }
+
+    public final void setInCache() {
+        this.cached = true;
     }
 
     public final void setNotInCache() {

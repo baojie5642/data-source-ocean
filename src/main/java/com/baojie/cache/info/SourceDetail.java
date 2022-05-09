@@ -3,6 +3,7 @@ package com.baojie.cache.info;
 public class SourceDetail {
 
     private String domain;              // 用户的域名账号名称,可以理解为是用户的别名或者是对应公司内部的员工id
+    private String dsid;                // 数据源 id
     private String user;                // 用户名
     private String pwd;                 // 密码
     private String jdbc;                // 连接串
@@ -15,6 +16,14 @@ public class SourceDetail {
 
     public SourceDetail() {
 
+    }
+
+    public String getDsid() {
+        return dsid;
+    }
+
+    public void setDsid(String dsid) {
+        this.dsid = dsid;
     }
 
     public String getDomain() {
@@ -135,6 +144,7 @@ public class SourceDetail {
                 ", ip='" + ip + '\'' +
                 ", port='" + port + '\'' +
                 ", type=" + type +
+                ", dsid=" + dsid +
                 ", proxy=" + proxy +
                 ", proxyKey='" + proxyKey + '\'' +
                 '}';

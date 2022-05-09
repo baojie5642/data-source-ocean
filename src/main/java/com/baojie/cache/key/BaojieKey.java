@@ -1,15 +1,24 @@
 package com.baojie.cache.key;
 
 import com.baojie.cache.info.SourceDetail;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicStampedReference;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 public abstract class BaojieKey<T extends SourceDetail> implements Key<T> {
 
+    protected final Logger log = LoggerFactory.getLogger(getClass());
+
+    public static final long SEC_5 = TimeUnit.MILLISECONDS.convert(5, TimeUnit.SECONDS);
     public static final long SEC_10 = TimeUnit.MILLISECONDS.convert(10, TimeUnit.SECONDS);
+    public static final long SEC_15 = TimeUnit.MILLISECONDS.convert(15, TimeUnit.SECONDS);
+    public static final long SEC_25 = TimeUnit.MILLISECONDS.convert(25, TimeUnit.SECONDS);
+    public static final long SEC_35 = TimeUnit.MILLISECONDS.convert(35, TimeUnit.SECONDS);
     public static final long SEC_45 = TimeUnit.MILLISECONDS.convert(45, TimeUnit.SECONDS);
 
     public static final long MIN_1_M = TimeUnit.MILLISECONDS.convert(1, TimeUnit.MINUTES);
@@ -21,6 +30,7 @@ public abstract class BaojieKey<T extends SourceDetail> implements Key<T> {
     public static final long MIN_60_M = TimeUnit.MILLISECONDS.convert(60, TimeUnit.MINUTES);
 
     public static final long HOUR_6 = TimeUnit.MILLISECONDS.convert(6, TimeUnit.HOURS);
+    public static final long HOUR_8 = TimeUnit.MILLISECONDS.convert(8, TimeUnit.HOURS);
     public static final long HALF_DAY = TimeUnit.MILLISECONDS.convert(12, TimeUnit.HOURS);
 
     public static final long ONE_DAY = TimeUnit.MILLISECONDS.convert(1, TimeUnit.DAYS);
@@ -34,14 +44,17 @@ public abstract class BaojieKey<T extends SourceDetail> implements Key<T> {
     private final ReentrantReadWriteLock.WriteLock writeLock = mainLock.writeLock();
 
     private final ThreadLocalRandom random = ThreadLocalRandom.current();
+    // 统计总共地使用次数
+    private final AtomicLong usedTimes = new AtomicLong(0);
     // 有多少持有者
-    private final AtomicLong holders = new AtomicLong(0);
-    // 预计的超时时间
+    private final AtomicStampedReference<Integer> holders = new AtomicStampedReference(0, 0);
+    // 预计的超时时间,不准确
     private final AtomicLong expire = new AtomicLong(System.currentTimeMillis());
     // 可以外部调用方法进行设置
-    private volatile TimeUnit unit = TimeUnit.MINUTES;
+    private volatile TimeUnit unit = TimeUnit.SECONDS;
     // 可以外部调用方法进行设置
-    private volatile long appendTime = 3;
+    private volatile long appendTime = 15;
+    // 记录什么时候放入缓存
     private volatile long inCachedTime = System.currentTimeMillis();
 
     protected final String key;
@@ -60,12 +73,13 @@ public abstract class BaojieKey<T extends SourceDetail> implements Key<T> {
         }
     }
 
+    // 30 分钟基础时间
     private final long baseTimeOut() {
         final ReentrantReadWriteLock.WriteLock write = writeLock;
         write.lock();
         try {
             long now = System.currentTimeMillis();
-            long temp = now + MIN_45_M;
+            long temp = now + SEC_5;
             expire.set(temp);
             return temp;
         } finally {
@@ -88,16 +102,15 @@ public abstract class BaojieKey<T extends SourceDetail> implements Key<T> {
         final ReentrantReadWriteLock.ReadLock read = readLock;
         read.lock();
         try {
-            holders.incrementAndGet();
-            long base = TimeUnit.MILLISECONDS.convert(appendTime, unit);
+            incrementHolders();
+            usedTimes.incrementAndGet();
+            // 需要添加的 15 sec 基础时间
+            long base = TimeUnit.MILLISECONDS.convert(1, unit);
+            // 需要添加的 以 15 sec 为基准 的随机时间
             long rand = makeRandom();
+            // 可能存在少计算三分钟的情况
+            // 但是并不影响实际的功能
             long exp = expire.get();
-            long now = System.currentTimeMillis();
-            // 防止初始化 key 很长时间后在使用
-            // 造成刚放入缓存的资源可能立即被清理
-            if (exp <= now) {
-                exp = now;
-            }
             // append 基础 + append 随机
             long append = exp + base + rand;
             expire.set(append);
@@ -107,9 +120,33 @@ public abstract class BaojieKey<T extends SourceDetail> implements Key<T> {
         }
     }
 
+    private final void incrementHolders() {
+        for (; ; ) {
+            int current = holders.getReference().intValue();
+            int stamp = holders.getStamp();
+            if (holders.compareAndSet(current, current + 1, stamp, stamp + 1)) {
+                break;
+            }
+        }
+    }
+
+    private final void decrementHolders() {
+        for (; ; ) {
+            int current = holders.getReference().intValue();
+            if (current <= 0) {
+                break;
+            }
+            int stamp = holders.getStamp();
+            if (holders.compareAndSet(current, current - 1, stamp, stamp + 1)) {
+                break;
+            }
+        }
+    }
+
+    // 以 15 sec 为基准 的随机时间
     private final long makeRandom() {
         final TimeUnit un = unit;
-        final long app = appendTime;
+        final long app = 1;
         long ran = random.nextLong(TimeUnit.MILLISECONDS.convert(app, un)) + 1;
         return ran;
     }
@@ -118,16 +155,18 @@ public abstract class BaojieKey<T extends SourceDetail> implements Key<T> {
         final ReentrantReadWriteLock.ReadLock read = readLock;
         read.lock();
         try {
-            long test = holders.get();
+            // 不需要对 延迟清理时间 进行进行更新
+            long test = holders.getReference().intValue();
             // 以 0 为边界
             if (test > 0) {
-                holders.decrementAndGet();
+                decrementHolders();
             }
         } finally {
             read.unlock();
         }
     }
 
+    // 已经存在于cache中的时间
     public final long existMillis() {
         long now = System.currentTimeMillis();
         long exist = now - inCachedTime;
@@ -149,8 +188,8 @@ public abstract class BaojieKey<T extends SourceDetail> implements Key<T> {
     }
 
     // 探测正在使用资源的个数
-    public final long getHolders() {
-        return holders.get();
+    public final int getHolders() {
+        return holders.getReference().intValue();
     }
 
     // 探测资源的过期时间
@@ -167,7 +206,12 @@ public abstract class BaojieKey<T extends SourceDetail> implements Key<T> {
     // 两个必须联合调用
     public final boolean untouch() {
         final ReentrantReadWriteLock.WriteLock write = writeLock;
-        return write.tryLock();
+        write.unlock();
+        return true;
+    }
+
+    public final long hasUsedTimes() {
+        return usedTimes.get();
     }
 
     @Override
@@ -178,7 +222,14 @@ public abstract class BaojieKey<T extends SourceDetail> implements Key<T> {
         if (null == comp) {
             return false;
         }
-        if (comp instanceof BaojieKey) {
+        if (comp instanceof LocalKey) {
+            LocalKey key = LocalKey.class.cast(comp);
+            if (getKey().equals(key.getKey())) {
+                return true;
+            } else {
+                return false;
+            }
+        } else if (comp instanceof BaojieKey) {
             BaojieKey key = BaojieKey.class.cast(comp);
             if (getKey().equals(key.getKey())) {
                 return true;
@@ -201,7 +252,11 @@ public abstract class BaojieKey<T extends SourceDetail> implements Key<T> {
     @Override
     public String toString() {
         return "BaojieKey{" +
-                "key='" + key + '\'' +
+                "expire=" + expire +
+                ", inCachedTime=" + inCachedTime +
+                ", hasUsedTimes=" + usedTimes +
+                ", key='" + key + '\'' +
+                ", info=" + info +
                 '}';
     }
 
